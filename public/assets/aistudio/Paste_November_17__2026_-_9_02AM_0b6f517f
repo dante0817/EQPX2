@@ -1,0 +1,927 @@
+# EQP MODERN — BATCH MAG-B
+## MLv Vertical Local Magnitude Calculation and Integration
+
+### ROLE
+
+Act as a senior seismological software engineer, scientific TypeScript developer, and React application architect.
+
+You are working directly in the existing **EQP Modern Google AI Studio (GAS) workspace**.
+
+Your objective is to implement the first independent amplitude-based magnitude algorithm:
+
+**MLv — Vertical Local Magnitude**
+
+Use SeisComP's documented MLv calculation principles while integrating with EQP Modern's existing magnitude engine, amplitude measurement infrastructure, Settings, event state, and bulletin safeguards.
+
+**Implement directly in the existing workspace. Do not stop after planning.**
+
+---
+
+## 1. CURRENT DEVELOPMENT BASELINE
+
+The most recently completed batch is MAG-A — Structured Amplitude Measurements.
+
+Reported verification:
+
+- Automated tests: 203/203 PASS
+- TypeScript: PASS
+- Production build: PASS
+
+### Existing implemented components
+
+MAG-0:
+
+- Magnitude calculation fingerprints and freshness tracking
+- Historical magnitude preservation
+- Independent Recalculate Magnitude action
+- Calculation-bound analyst approval
+- Legacy ML/Md labeling corrections
+- Network magnitude aggregation
+- Bulletin consistency safeguards
+
+MAG-A:
+
+- `src/utils/amplitudeMeasurements.ts`
+- Structured `AmplitudeMeasurement` discriminated union
+- Multiple amplitude measurements per station
+- `AmplitudeMeasurementModal.tsx`
+- Stable `stationRefId` associations
+- Structural, completeness, and quality validation
+- Sidecar persistence, schemaVersion 3
+- Amplitude-aware future algorithm fingerprints
+- Undo/Redo and event-history integration
+- Preservation of legacy `StationPick.amplitude`
+- Existing Amp (µm) column retained
+
+### Existing magnitude infrastructure
+
+Inspect:
+
+- `src/utils/magnitudeEngine.ts`
+- `src/utils/legacyMagnitudeMath.ts`
+- `src/utils/amplitudeMeasurements.ts`
+- `src/components/MagnitudeConfigurationSection.tsx`
+- `src/components/MagnitudeResultsPanel.tsx`
+- `src/components/AmplitudeMeasurementModal.tsx`
+- `src/data/eqpData.ts`
+- `src/App.tsx`
+- Existing magnitude metadata and persistence utilities
+- Relevant automated tests
+
+Locate any additional dependencies in the actual workspace.
+
+Preserve existing working functionality.
+
+---
+
+# 2. MAIN OBJECTIVE
+
+Implement MLv so EQP Modern can calculate:
+
+1. Individual station MLv magnitudes.
+2. Network MLv magnitude.
+3. Station eligibility and rejection reasons.
+4. Calibration-aware magnitude results.
+5. Magnitude calculation freshness.
+6. MLv results alongside existing duration-based magnitudes.
+7. MLv as an optional preferred magnitude when scientifically eligible.
+
+The existing duration-derived magnitudes must remain unchanged.
+
+### Important
+
+MLv must be calculated independently of EQP Legacy Ms and Md.
+
+Do not derive MLv from duration.
+
+Do not convert Legacy Ms or Md into MLv.
+
+Do not automatically use the existing legacy Amp (µm) scalar as a calibrated MLv measurement.
+
+---
+
+# 3. SCIENTIFIC ALGORITHM
+
+Implement SeisComP-style MLv station magnitude:
+
+\[
+M_{Lv}=\log_{10}(A)-\log_{10}(A_0(\Delta))+C_s
+\]
+
+Where:
+
+- A = Wood–Anderson-equivalent vertical displacement amplitude in millimeters.
+- Δ = epicentral distance.
+- A0(Δ) = empirical reference amplitude as a function of epicentral distance.
+- Cs = optional calibrated station correction under an explicitly documented sign convention.
+
+The calculation must use a configurable attenuation function, not hardcoded coefficients.
+
+### Calculation requirements
+
+1. Retrieve a qualifying vertical Wood–Anderson-equivalent amplitude.
+2. Validate the measurement.
+3. Convert displacement amplitude to millimeters where necessary.
+4. Calculate epicentral distance using the existing valid hypocenter and station coordinates.
+5. Retrieve the applicable calibration profile.
+6. Determine the attenuation correction.
+7. Apply the station correction, if specified.
+8. Calculate the station MLv.
+9. Aggregate eligible station MLv results into a network magnitude.
+
+Do not use hypocentral distance in place of epicentral distance without a specifically documented calibration profile requiring it.
+
+Do not silently extrapolate outside the configured calibration distance range.
+
+### Important scientific limitation
+
+SeisComP's documented default MLv processing uses vertical Wood–Anderson-equivalent amplitudes and a configurable distance range, commonly 0–8 degrees.
+
+These defaults are reference behavior, **not automatically validated for the Philippines**.
+
+Do not claim Philippine scientific calibration merely because the MLv equation has been implemented.
+
+---
+
+# 4. CALIBRATION PROFILES
+
+Extend the existing magnitude configuration and calibration framework.
+
+Support a versioned MLv calibration profile containing:
+
+- Profile identifier
+- Profile version
+- Magnitude method: mlv-vertical
+- Regional applicability
+- Scientific source/reference
+- Calibration status
+- Amplitude measurement convention
+- Distance metric and units
+- Minimum distance
+- Maximum distance
+- Attenuation function
+- Station corrections
+- Optional applicable depth bounds
+- Effective date or other relevant provenance, if available
+
+### Attenuation function
+
+Support a configurable distance-versus-logA0 table.
+
+Example structure:
+
+| Distance (km) | log10(A0) |
+|---|---|
+| 0 | -1.3 |
+| 60 | -2.8 |
+| 100 | -3.0 |
+| 400 | -4.5 |
+| 1000 | -5.85 |
+
+These are SeisComP documentation example values.
+
+**Do not adopt this example as the operational Philippine calibration.**
+
+The application may use a clearly labeled reference/test profile for deterministic tests or explicitly opted-in experimental evaluation.
+
+Do not silently install an example profile as an approved production calibration.
+
+### Interpolation
+
+Implement linear interpolation between valid calibration table points.
+
+Requirements:
+
+- Distance nodes must be finite, ordered, and unique.
+- Attenuation values must be finite.
+- No silent extrapolation.
+- Reject malformed curves.
+- Preserve interpolation precision.
+- Apply configured minimum/maximum distance restrictions.
+
+Do not invent attenuation values when a required interval is unavailable.
+
+### Station corrections
+
+Support station-specific corrections using the existing station identification conventions.
+
+Use network/station/location identifiers as available.
+
+Avoid applying a station-specific correction to another station with the same short station code.
+
+Explicitly document correction units and sign conventions.
+
+If a profile does not require station corrections, an absent correction may represent zero. Do not assume missing required calibration information is zero.
+
+### Calibration status
+
+Distinguish:
+
+- Pending calibration
+- Experimental / Uncalibrated
+- Calibrated / Approved
+- Invalid calibration
+
+A manually entered profile must not automatically become institutionally approved.
+
+Use the existing approval/provenance architecture. Do not invent a new authorization system.
+
+If no operationally approved calibration is available, MLv may be mathematically evaluated using a valid explicitly selected experimental profile but must remain visibly experimental and subject to existing publication safeguards.
+
+---
+
+# 5. AMPLITUDE ELIGIBILITY
+
+Use MAG-A's existing structured `AmplitudeMeasurement` records.
+
+### Accepted measurement category
+
+For MLv, require a suitable:
+
+`wood_anderson_local`
+
+measurement representing vertical-component Wood–Anderson-equivalent displacement.
+
+### Required information
+
+- Valid positive amplitude
+- Compatible physical quantity: displacement
+- Supported displacement unit
+- Identifiable vertical seismic channel/component
+- Appropriate amplitude convention
+- Valid processing/response provenance
+- Suitable measurement quality
+- Stable station association
+- Valid earthquake location
+- Applicable calibration profile
+
+### Vertical-channel validation
+
+Recognize suitable vertical component metadata, such as BHZ, EHZ, HHZ, or other correctly identified vertical channels.
+
+Do not blindly assume a channel is vertical when metadata contradicts that interpretation.
+
+Do not use horizontal channels for MLv.
+
+### Unsupported input
+
+Reject or mark ineligible:
+
+- Raw waveform counts
+- Unknown physical quantity
+- Velocity amplitudes not processed into the required displacement measurement
+- Uncorrected waveform measurements
+- Unknown/incompatible amplitude convention
+- Clipped observations, according to the conservative quality policy
+- Excluded measurements
+- Measurements with invalid station associations
+- Non-positive amplitudes
+- Missing calibration
+- Measurements outside the calibrated distance range
+
+### Amplitude convention
+
+Distinguish zero-to-peak and peak-to-peak amplitudes.
+
+Use only the convention required by the selected calibration profile.
+
+Do not silently divide or multiply amplitudes by two.
+
+If a validated conversion rule is implemented, preserve the original measurement, record the applied transformation, and include it in calculation provenance.
+
+### Important
+
+Do not implement Wood–Anderson instrument simulation in MAG-B.
+
+The amplitude supplied to MLv must already satisfy the required Wood–Anderson-equivalent processing convention.
+
+Automatic waveform simulation belongs to a future batch.
+
+---
+
+# 6. MULTIPLE MEASUREMENTS PER STATION
+
+MAG-A supports multiple amplitude records per station.
+
+MLv must handle this correctly.
+
+A station may contain several vertical amplitude measurements from different channels or recording configurations.
+
+### Required behavior
+
+1. Identify all MLv-compatible measurements.
+2. Exclude invalid or ineligible records.
+3. Apply an explicit deterministic measurement-selection policy.
+4. Produce only one station contribution for the same station under the selected policy.
+5. Record which amplitude measurement was used.
+
+Do not automatically select the largest amplitude simply because it produces a larger magnitude.
+
+Do not count several channels from the same station as independent station magnitudes unless a documented scientific method explicitly requires it.
+
+If multiple equally eligible measurements cannot be unambiguously resolved, mark the station as requiring measurement selection.
+
+Prefer reuse of MAG-A's stable station and measurement identifiers.
+
+### Result provenance
+
+Record:
+
+- Selected measurement ID
+- Station reference
+- Channel
+- Original amplitude and unit
+- Converted amplitude in mm
+- Distance
+- Applied attenuation
+- Station correction
+- Final station MLv
+- Quality/eligibility status
+
+---
+
+# 7. INDIVIDUAL STATION MLv CALCULATION
+
+Implement a pure calculation function in an appropriate module, such as:
+
+`src/utils/mlvMagnitude.ts`
+
+This is a suggested file name. Follow the existing project structure.
+
+The function must not depend on React state.
+
+### Required inputs
+
+- Validated amplitude measurement
+- Epicentral distance
+- Calibration profile
+- Applicable station correction
+
+### Required output
+
+Return a typed calculation result including:
+
+- Station magnitude or null
+- Status
+- Error/rejection reason
+- Calculation provenance
+- Calibration profile ID/version
+- Input measurement ID
+
+Preserve the existing magnitude engine's status semantics.
+
+Do not return zero for missing or failed results.
+
+A mathematically valid magnitude of zero must remain distinguishable from an unavailable result.
+
+Use finite-number checks and appropriate numeric precision.
+
+---
+
+# 8. NETWORK MLv MAGNITUDE
+
+Integrate station MLv values with the existing aggregation infrastructure.
+
+Supported methods should follow existing settings:
+
+- Median
+- Arithmetic mean
+- Trimmed mean
+
+Do not create another network aggregation implementation unnecessarily.
+
+### Requirements
+
+- Aggregate only valid eligible station magnitudes.
+- Prevent duplicate station contributions.
+- Preserve individual station results.
+- Report the actual aggregation method.
+- Report excluded observations.
+- Report contributing-station count.
+- Report station-magnitude dispersion where supported.
+- Respect the MAG-0 small-sample trimmed-mean policy.
+
+For experimental or operational calibration profiles, apply the documented minimum-contributing-station policy where configured.
+
+If only one valid station remains, the system may retain a station MLv estimate but must not misrepresent it as a well-constrained multi-station network magnitude.
+
+Do not combine MLv, Legacy Ms, and Md numerically.
+
+Each scale must remain independently calculated.
+
+---
+
+# 9. INTEGRATE WITH THE EXISTING MAGNITUDE ENGINE
+
+Extend:
+
+`src/utils/magnitudeEngine.ts`
+
+Implement the existing method identifier:
+
+`mlv-vertical`
+
+Update its implementation status only after the algorithm is connected and verified.
+
+### Requirements
+
+- Use existing method registration conventions.
+- Use the MAG-A amplitude measurement collection.
+- Reuse existing magnitude result types.
+- Reuse existing calculation-status handling.
+- Reuse existing station magnitude aggregation.
+- Reuse existing calibration and approval framework.
+- Reuse MAG-0 freshness tracking.
+
+Do not introduce a separate parallel magnitude manager.
+
+### Calculation behavior
+
+The existing engine must be able to evaluate:
+
+- EQP Legacy Ms
+- Md
+- MLv
+
+independently, provided each method is enabled and its requirements are met.
+
+A failure in MLv must not erase valid Legacy Ms or Md results.
+
+---
+
+# 10. MAGNITUDE FRESHNESS AND APPROVAL
+
+MAG-0 introduced calculation fingerprints.
+
+MAG-A introduced:
+
+`selectAmplitudeInputsForAlgorithmFingerprint`
+
+Extend the MLv fingerprint to include all relevant MLv inputs, such as:
+
+- Selected amplitude measurement values
+- Measurement identifiers
+- Units and conventions
+- Channel/component and processing provenance
+- Applicable measurement quality and exclusion flags
+- Station location/association
+- Epicentral distance inputs
+- Calibration profile ID/version and attenuation data
+- Station corrections
+- Aggregation policy
+- Relevant station inclusion/exclusion state
+
+Do not include unrelated amplitude records or UI data.
+
+### Expected behavior
+
+Changing an MLv-relevant amplitude invalidates the affected MLv result.
+
+It must not unnecessarily invalidate duration-derived Legacy Ms or Md.
+
+Changing duration must not unnecessarily invalidate MLv.
+
+Changing earthquake location or relevant station coordinates must invalidate distance-dependent magnitude results.
+
+Changing calibration coefficients or attenuation curves must invalidate affected MLv results.
+
+### Analyst approval
+
+Experimental MLv approval must be tied to the specific calculation identity.
+
+If the underlying MLv calculation changes, prior approval must be invalidated.
+
+Preserve the existing MAG-0 publication safeguards.
+
+---
+
+# 11. MAGNITUDE SETTINGS INTEGRATION
+
+Extend the existing Magnitude Configuration section.
+
+### Required change
+
+MLv must no longer be displayed simply as "Not Yet Implemented" after its calculation functionality is complete.
+
+However, distinguish **software implementation** from **scientific calibration readiness**.
+
+For example:
+
+- Implemented — Calibration Required
+- Implemented — Experimental
+- Implemented — Calibrated
+
+### Default configuration
+
+Preserve:
+
+**Default preferred magnitude: EQP Legacy Ms**
+
+Do not automatically change the default to MLv.
+
+### MLv enablement
+
+Allow analysts to enable MLv as an additional calculation method where an appropriate calibration profile is configured.
+
+If no usable profile is configured:
+
+- Show calibration pending.
+- Explain why calculation is unavailable.
+- Do not produce fabricated values.
+
+Do not automatically enable experimental evaluation.
+
+### Advanced settings
+
+Integrate MLv calibration profiles into the existing Advanced Magnitude Settings interface.
+
+Use concise controls and collapse advanced options where appropriate.
+
+Avoid redesigning the entire Settings tab.
+
+---
+
+# 12. MAGNITUDE RESULTS PANEL
+
+Extend the existing:
+
+`MagnitudeResultsPanel.tsx`
+
+Display MLv alongside duration-based results.
+
+Example conceptual presentation:
+
+| Method | Magnitude | Status |
+|---|---|---|
+| EQP Legacy Ms | Existing result | Current |
+| Md | Existing result or unavailable | Calibration-dependent |
+| MLv | Calculated result or unavailable | Calibration-dependent |
+
+These are examples of status display, not invented numerical values.
+
+### Required MLv details
+
+Show:
+
+- Network MLv result
+- Number of contributing stations
+- Aggregation method
+- Calibration status
+- Profile ID/version
+- Station-level results
+- Exclusion reasons
+
+Use the existing expandable station-magnitude details interface.
+
+Do not create a separate full-page MLv screen.
+
+### Preferred magnitude
+
+If MLv is valid and eligible under the application's publication policy, it may be selected as the event's preferred magnitude.
+
+Changing preferred magnitude must not rerun the earthquake-location solver.
+
+The existing per-event override must remain functional.
+
+---
+
+# 13. PLOT AND RECALCULATE MAGNITUDE
+
+Preserve the distinction:
+
+**PLOT = Calculate Earthquake Location**
+
+**Recalculate Magnitude = Reevaluate Magnitudes Using Existing Valid Location**
+
+### PLOT behavior
+
+After successful location:
+
+1. Preserve computed hypocenter.
+2. Evaluate enabled magnitude methods.
+3. Calculate Legacy Ms and Md as before.
+4. Calculate MLv if valid amplitude measurements and calibration are available.
+5. Display independent results.
+
+Do not alter the location solver.
+
+### Recalculate Magnitude behavior
+
+When an analyst modifies amplitude measurements after location:
+
+1. Preserve the current valid hypocenter.
+2. Reevaluate MLv using updated measurements.
+3. Refresh relevant MLv results.
+4. Preserve duration-based results when their inputs are unchanged.
+5. Update freshness and approval states.
+
+Do not rerun PLOT unnecessarily.
+
+Do not overwrite original station amplitudes or durations.
+
+---
+
+# 14. EVENT SAVE/REOPEN AND BULLETIN INTEGRATION
+
+Reuse the existing event persistence architecture:
+
+- Legacy `.eqp`
+- `.eqp.meta.json` sidecar
+
+Do not alter the original ASCII `.eqp` format.
+
+### Persistence
+
+Preserve:
+
+- Structured amplitude measurements
+- MLv station results
+- Network MLv
+- Calibration profile ID/version
+- Calculation identity/fingerprint
+- Preferred method selection
+- Experimental/calibration status
+- Station exclusions and provenance
+
+Avoid storing redundant derived values where the existing magnitude metadata already provides a suitable location.
+
+### Historical event behavior
+
+Opening a saved event must not automatically recalculate MLv.
+
+Preserve historical magnitude results and distinguish them from newly calculated values.
+
+If required sidecar metadata is absent, do not pretend the saved event has a verified MLv calculation.
+
+### Bulletin integration
+
+Use the existing shared magnitude resolver.
+
+If MLv is selected as preferred:
+
+- Display the proper MLv label.
+- Preserve its numerical value.
+- Preserve calibration status.
+- Respect freshness checks.
+- Respect experimental/uncalibrated approval requirements.
+
+Do not silently substitute Legacy Ms or another magnitude.
+
+Ensure bulletin HTML, PDF, print, preview and save-target behavior remain consistent.
+
+Do not modify unrelated bulletin formatting.
+
+---
+
+# 15. SCIENTIFIC TESTING
+
+Add focused tests for MLv.
+
+### A. Formula
+
+Verify:
+
+- Correct logarithmic calculation.
+- Correct amplitude conversion to millimeters.
+- Correct attenuation interpolation.
+- Correct station correction sign.
+- Correct handling of mathematically valid zero or negative magnitude values.
+- Numerical stability and finite outputs.
+
+### B. Attenuation
+
+Verify:
+
+- Exact calibration nodes.
+- Interpolation between nodes.
+- Minimum distance boundary.
+- Maximum distance boundary.
+- Invalid/duplicate nodes.
+- Unsupported extrapolation.
+- Missing calibration.
+
+### C. Amplitude eligibility
+
+Verify rejection of:
+
+- Raw counts.
+- Horizontal channels.
+- Wrong physical quantities.
+- Zero/negative/non-finite amplitudes.
+- Missing response-processing information.
+- Incompatible measurement convention.
+- Clipped/excluded observations.
+- Ambiguous station measurements.
+
+### D. Station/network calculation
+
+Verify:
+
+- One station contribution per selected station.
+- Multiple vertical measurements handling.
+- Invalid measurement exclusion.
+- Network aggregation.
+- Small sample behavior.
+- Correct contribution counts.
+- Calibration provenance.
+
+### E. Existing functionality
+
+Verify:
+
+- Legacy Ms numerical results unchanged.
+- Md calculation unchanged.
+- Per-event preferred magnitude selection.
+- Recalculate Magnitude without relocation.
+- MLv-only amplitude edits do not invalidate duration-only results.
+- Magnitude approval invalidation.
+- Save/reopen preservation.
+- Bulletin scientific labels.
+- Existing fixed-width station editor unaffected.
+- Atlas/Hydra paste behavior unaffected.
+
+Use deterministic test fixtures.
+
+Reference SeisComP documentation may be used to construct mathematical test cases, but passing those cases does not establish Philippine regional calibration.
+
+---
+
+# 16. DEVELOPMENT VERIFICATION
+
+Run:
+
+- Focused automated MLv tests
+- Relevant magnitude-engine tests
+- Legacy magnitude compatibility tests
+- TypeScript typecheck
+- Vite production build
+
+If the existing test suite is inexpensive, it may also be run once as a regression safeguard.
+
+Avoid unnecessary repetitive acceptance campaigns.
+
+Do not require comprehensive Philippine earthquake validation before completing this development batch.
+
+However, mark uncalibrated MLv explicitly and preserve publication safeguards.
+
+---
+
+# 17. STRICT SCOPE LIMITATIONS
+
+Do not:
+
+- Modify the earthquake-location solver.
+- Change PLOT's meaning.
+- Change the EQP Legacy Ms formula.
+- Change the original duration-based magnitude results.
+- Replace the existing Magnitude Settings architecture.
+- Rebuild MAG-A's amplitude editor.
+- Modify the existing Atlas/Hydra parser unnecessarily.
+- Implement horizontal ML.
+- Implement mb.
+- Implement Ms_20.
+- Implement Wood–Anderson waveform simulation.
+- Implement waveform acquisition or instrument-response deconvolution.
+- Introduce unnecessary dependencies.
+- Modify PRIMER or Research Assistant.
+- Initialize Git or synchronize repositories.
+- Deploy the application.
+- Fabricate Philippine attenuation coefficients.
+- Present experimental MLv as operationally validated.
+
+Work strictly sequentially.
+
+---
+
+# 18. IMPLEMENTATION SEQUENCE
+
+### Step 1 — Audit
+
+Inspect MAG-A measurement structures, MAG-0 freshness logic, current magnitude-engine interfaces and calibration settings.
+
+Confirm integration points.
+
+### Step 2 — MLv Scientific Module
+
+Implement the pure MLv calculation, attenuation interpolation and calibration validation.
+
+### Step 3 — Measurement Eligibility
+
+Implement vertical amplitude selection and validation using existing structured measurements.
+
+### Step 4 — Station and Network MLv
+
+Calculate station magnitudes and aggregate valid contributions.
+
+### Step 5 — Magnitude Engine
+
+Integrate `mlv-vertical` with the existing shared engine.
+
+### Step 6 — Settings
+
+Enable the implemented MLv option with appropriate calibration and experimental safeguards.
+
+### Step 7 — Results and Workflow
+
+Integrate MLv with the Magnitude Results panel, PLOT, independent recalculation, and per-event preference handling.
+
+### Step 8 — Persistence and Bulletin
+
+Preserve MLv results and metadata using existing save/reopen and bulletin systems.
+
+### Step 9 — Verification
+
+Run focused tests, typecheck and build.
+
+Fix confirmed defects introduced by this batch.
+
+Complete each step before proceeding to the next.
+
+---
+
+# 19. ACCEPTANCE CRITERIA
+
+MAG-B is development-complete when:
+
+- MLv calculation is implemented.
+- Compatible vertical Wood–Anderson amplitudes are correctly selected.
+- Invalid/incompatible measurements are rejected.
+- Amplitude units are handled correctly.
+- Attenuation interpolation works.
+- Calibration profiles are versioned and validated.
+- Individual station MLv results are available.
+- Network MLv is calculated from eligible station magnitudes.
+- MLv can be enabled in Settings when appropriately configured.
+- MLv appears alongside Legacy Ms and Md.
+- MLv can be selected as preferred when eligible.
+- Recalculate Magnitude updates MLv without rerunning PLOT.
+- Relevant amplitude edits invalidate MLv results.
+- Duration-only magnitudes remain unaffected by amplitude-only changes.
+- Save/reopen preserves MLv information.
+- Bulletin safeguards remain operational.
+- Existing EQP functionality is preserved.
+- Focused tests pass.
+- TypeScript and build pass.
+
+Scientific operational acceptance remains dependent on a suitable calibrated Philippine attenuation profile.
+
+---
+
+# 20. REQUIRED COMPLETION REPORT
+
+Provide:
+
+1. Source architecture reviewed.
+2. Files created or modified.
+3. MLv equation implemented.
+4. Measurement eligibility rules.
+5. Calibration profile structure.
+6. Attenuation interpolation behavior.
+7. Station magnitude calculation.
+8. Network magnitude calculation.
+9. Settings integration.
+10. Results and preferred-magnitude integration.
+11. PLOT/recalculation integration.
+12. Persistence and bulletin integration.
+13. Test counts and outcomes.
+14. TypeScript/build results.
+15. Scientific limitations.
+16. Readiness for the next development batch.
+
+Use explicit status categories:
+
+- IMPLEMENTED
+- UNIT VERIFIED
+- IMPLEMENTED — EXPERIMENTAL
+- CALIBRATION PENDING
+- NOT LIVE VERIFIED
+- BLOCKED
+- NOT IMPLEMENTED
+
+Do not claim operational scientific validation simply because software tests pass.
+
+---
+
+# FINAL INSTRUCTION
+
+Proceed with **Batch MAG-B — MLv Vertical Local Magnitude Calculation** in the current GAS workspace.
+
+Use the amplitude measurements created in MAG-A and integrate directly into the magnitude engine stabilized in MAG-0.
+
+Preserve EQP Legacy Ms as the default.
+
+Allow duration-based and MLv amplitude-based magnitudes to coexist for the same earthquake.
+
+Keep all magnitude calculations scientifically distinct, calibration-aware, and independently selectable.
+
+Use SeisComP's documented MLv approach as a reference, but do not silently adopt its calibration examples as approved Philippine operational coefficients.
+
+Complete the implementation, perform focused verification, and provide the completion report.
+
+**Stop after MAG-B. Do not begin MAG-C until MAG-B has been reviewed.**
+
+### Official scientific references
+
+- [SeisComP MLv documentation](https://docs.gempa.de/seiscomp/7.4.0/apps/global_mlv.html)
+- [SeisComP Amplitude and Magnitude Processing](https://www.seiscomp.de/doc/base/concepts/magnitudes.html)
+- [SeisComP Global Magnitude Configuration](https://www.seiscomp.de/doc/apps/global.html)

@@ -1,0 +1,1141 @@
+# EQP MODERN — BATCH MAG-D
+## Horizontal Local Magnitude (ML) Calculation and Multi-Method Integration
+
+### ROLE
+
+Act as a senior seismological software engineer, TypeScript/React developer, and scientific magnitude-processing architect.
+
+You are working directly in the existing **EQP Modern Google AI Studio (GAS) workspace**.
+
+Your objective is to implement the next amplitude-based magnitude algorithm:
+
+**ML — Horizontal Local Magnitude (Richter-type)**
+
+Follow the documented scientific principles of SeisComP's standard ML processor while reusing EQP Modern's existing amplitude measurements, magnitude engine, calibration infrastructure, method-selection interface, and event persistence.
+
+**Implement the changes directly in the existing workspace. Do not stop after producing a plan.**
+
+---
+
+# 1. CURRENT DEVELOPMENT BASELINE
+
+The completed batches are:
+
+### MAG-0 — Magnitude Stabilization
+
+- Deterministic magnitude calculation fingerprints.
+- Independent Recalculate Magnitude action.
+- Historical magnitude preservation.
+- Calculation-bound analyst approval.
+- Legacy magnitude labeling corrections.
+- Network aggregation safeguards.
+- Unified bulletin magnitude resolution.
+
+### MAG-A — Amplitude Measurements
+
+- Structured amplitude measurement model.
+- Multiple measurements per station.
+- Channel, unit, processing and provenance information.
+- Amplitude Measurement Modal.
+- Stable station associations.
+- Measurement validation.
+- `.eqp.meta.json` persistence.
+- Legacy Amp (µm) preservation.
+
+### MAG-B — MLv Calculation
+
+- Vertical local magnitude calculation.
+- Wood–Anderson-equivalent amplitude eligibility.
+- Displacement unit conversion.
+- Distance-dependent attenuation interpolation.
+- Calibration profiles and station corrections.
+- Station and network MLv results.
+- Method-specific freshness tracking.
+
+### MAG-C — Multi-Method Selection
+
+- Global and per-event magnitude-method selections.
+- Inherit Global / Customize for This Event.
+- Simultaneous magnitude evaluation.
+- Magnitude comparison table.
+- Per-method station details.
+- Preferred magnitude selection.
+- Experimental approval safeguards.
+- Method-selection persistence.
+
+### Latest reported verification
+
+- Automated tests: **214/214 PASS**
+- TypeScript typecheck: PASS
+- Production build: PASS
+- Live browser verification: Not performed
+
+Treat these as previously reported results. Inspect the current workspace before making changes.
+
+### Relevant source files
+
+Inspect at least:
+
+- `src/utils/magnitudeEngine.ts`
+- `src/utils/mlvMagnitude.ts`
+- `src/utils/magnitudeAggregation.ts`
+- `src/utils/amplitudeMeasurements.ts`
+- `src/components/AmplitudeMeasurementModal.tsx`
+- `src/components/MagnitudeConfigurationSection.tsx`
+- `src/components/MagnitudeResultsPanel.tsx`
+- `src/data/eqpData.ts`
+- `src/App.tsx`
+- Existing station metadata and event persistence utilities.
+- Existing magnitude tests.
+
+Locate related files as necessary.
+
+Do not recreate completed systems.
+
+---
+
+# 2. MAIN OBJECTIVE
+
+Implement independent horizontal local magnitude calculation using valid, calibrated Wood–Anderson-equivalent horizontal amplitude measurements.
+
+After MAG-D, EQP Modern should support four independently implemented magnitude methods:
+
+| Method | Measurement basis |
+|---|---|
+| EQP Legacy Ms | Original duration-derived magnitude |
+| Md | Coda duration |
+| MLv | Vertical Wood–Anderson amplitude |
+| ML | Horizontal Wood–Anderson amplitudes |
+
+Each method must remain scientifically distinct.
+
+The system should calculate all selected, eligible methods for the same earthquake without rerunning the location solver independently for each method.
+
+### Scope restrictions
+
+MAG-D must not implement:
+
+- mb
+- mB
+- Ms_20
+- Ms(BB)
+- Mwp
+- Automatic waveform acquisition
+- Wood–Anderson waveform simulation
+- Instrument-response deconvolution
+- New magnitude-scale conversion relationships
+
+These belong to later development batches.
+
+---
+
+# 3. SCIENTIFIC ALGORITHM
+
+Implement the standard local-magnitude relationship:
+
+\[
+M_L=\log_{10}(A_H)-\log_{10}(A_0(\Delta))+C_s
+\]
+
+Where:
+
+- \(A_H\) = horizontal Wood–Anderson-equivalent amplitude in millimeters, obtained using the selected component-combination policy.
+- \(\Delta\) = distance defined by the selected ML calibration profile, normally epicentral distance.
+- \(A_0(\Delta)\) = empirical reference amplitude.
+- \(C_s\) = applicable station correction under an explicitly documented sign convention.
+
+### Requirements
+
+1. Obtain valid horizontal Wood–Anderson-equivalent amplitude measurements.
+2. Validate measurement units and processing provenance.
+3. Select appropriate horizontal components.
+4. Apply the explicitly configured horizontal-component combination method.
+5. Convert the resulting amplitude to millimeters.
+6. Determine the correct station distance.
+7. Interpolate the ML attenuation curve.
+8. Apply station corrections.
+9. Calculate individual station ML values.
+10. Aggregate eligible station magnitudes into network ML.
+
+Do not hardcode Philippine attenuation coefficients.
+
+Do not automatically reuse the MLv attenuation curve as the ML calibration.
+
+The two magnitude types may use similar mathematics but require independent scientific configuration.
+
+---
+
+# 4. HORIZONTAL COMPONENT IDENTIFICATION
+
+MAG-A already supports multiple measurements per station.
+
+Extend the scientific eligibility logic to identify valid horizontal Wood–Anderson-equivalent amplitudes.
+
+### Common channel examples
+
+Potential horizontal channels include:
+
+- BHN
+- BHE
+- HHN
+- HHE
+- EHN
+- EHE
+- BH1
+- BH2
+- HH1
+- HH2
+
+A channel ending in N or E generally indicates a horizontal orientation.
+
+However, channels ending in 1 or 2 require appropriate orientation metadata. Do not assume they are horizontal merely because of the numeric suffix.
+
+### Required behavior
+
+- Accept properly identified horizontal measurements.
+- Reject vertical channels for ML.
+- Recognize two orthogonal horizontal components when supported by verified channel orientation.
+- Preserve channel identity and measurement provenance.
+- Do not mix components from different stations.
+- Do not mix unrelated sensor locations or processing configurations.
+- Do not assume different components are orthogonal without appropriate evidence.
+
+If actual channel orientation metadata is unavailable, use conservative identification rules and report unresolved orientation explicitly.
+
+### Component pairing
+
+A suitable horizontal pair should normally belong to the same:
+
+- Network
+- Station
+- Sensor location
+- Instrument/processing configuration
+- Applicable measurement interval or event observation
+
+Do not combine unrelated measurements simply because their station codes match.
+
+---
+
+# 5. HORIZONTAL AMPLITUDE COMBINATION
+
+This is an important difference between ML and MLv.
+
+MLv uses a single suitable vertical component.
+
+ML uses horizontal-component measurements according to a documented combination policy.
+
+### Required approach
+
+Implement an explicit, configurable horizontal-combination policy.
+
+Support, as appropriate:
+
+**A. Mean Horizontal Amplitude**
+
+\[
+A_H=\frac{A_1+A_2}{2}
+\]
+
+**B. Maximum Horizontal Amplitude**
+
+\[
+A_H=\max(A_1,A_2)
+\]
+
+These formulas represent alternative amplitude-combination policies, not universally interchangeable scientific conventions.
+
+The selected calibration profile must specify which policy applies.
+
+Do not silently select the larger component as the universal ML rule.
+
+### Important processing details
+
+Before combining:
+
+- Both measurements must represent compatible physical quantities.
+- Both must use compatible amplitude conventions.
+- Both must be Wood–Anderson-equivalent amplitudes.
+- Both must satisfy processing and quality requirements.
+- Measurements must be converted to a common physical unit.
+
+Do not average a peak-to-peak amplitude with a zero-to-peak amplitude without an explicitly validated conversion.
+
+### Missing horizontal component
+
+Default operational policy:
+
+**Require two valid, compatible horizontal components when the configured ML method is defined for a horizontal pair.**
+
+If only one component is available:
+
+- Retain the valid observation.
+- Report the missing component.
+- Mark the station contribution unavailable under the paired-component policy.
+
+A single-horizontal-component experimental option may be supported only when the calibration profile explicitly permits and documents that method.
+
+Do not silently substitute one component for a required pair.
+
+### Component-selection ambiguity
+
+If several eligible horizontal measurements are present:
+
+- Apply an explicit deterministic component-pair selection policy.
+- Prioritize scientific compatibility and measurement quality.
+- Reject unresolved ambiguity where necessary.
+- Record the selected measurement IDs.
+
+Do not automatically use the pair producing the largest magnitude.
+
+---
+
+# 6. AMPLITUDE ELIGIBILITY
+
+Reuse the MAG-A measurement model and validation infrastructure.
+
+### Accepted measurement type
+
+Use suitable `wood_anderson_local` measurements representing horizontal displacement.
+
+### Required eligibility
+
+- Positive finite amplitude.
+- Compatible displacement unit.
+- Appropriate horizontal channel/orientation.
+- Valid Wood–Anderson processing provenance.
+- Response/processing status consistent with the measurement.
+- Compatible amplitude convention.
+- Valid station association.
+- Appropriate measurement quality.
+- No disqualifying clipping or exclusion.
+- Valid station distance.
+- Applicable ML calibration profile.
+
+### Reject or flag
+
+- Raw digitizer counts.
+- Uncorrected broadband displacement.
+- Velocity amplitudes not processed into the required displacement convention.
+- Vertical-only measurements.
+- Incompatible component conventions.
+- Incompatible response metadata.
+- Invalid channel orientation.
+- Clipped or excluded observations.
+- Ambiguous horizontal-component associations.
+- Missing mandatory calibration.
+- Unsupported station distance.
+
+Do not automatically use the legacy `StationPick.amplitude` scalar.
+
+Do not fabricate missing response information.
+
+### Scientific eligibility integration
+
+Activate `ml-local` eligibility in the existing measurement-validation framework only after its implementation is complete.
+
+Keep other future algorithms disabled.
+
+---
+
+# 7. ML CALIBRATION PROFILE
+
+Implement an independent, versioned ML calibration configuration.
+
+Reuse MAG-B's calibration infrastructure wherever appropriate.
+
+### Required profile fields
+
+- Profile ID.
+- Profile version.
+- Algorithm identifier: `ml-local`.
+- Scientific source/reference.
+- Regional applicability.
+- Calibration status.
+- Distance metric.
+- Minimum/maximum distance.
+- Applicable depth range.
+- Attenuation curve.
+- Horizontal component combination method.
+- Required number of horizontal components.
+- Amplitude convention.
+- Station corrections.
+- Minimum contributing-station policy.
+- Experimental-evaluation permission.
+
+### Attenuation curve
+
+Support distance-versus-logA0 values.
+
+Reuse the validated interpolation implementation from MAG-B if mathematically and structurally compatible.
+
+Avoid duplicating essentially identical interpolation code.
+
+Requirements:
+
+- Ordered finite distance nodes.
+- Unique distance positions.
+- Finite logA0 values.
+- Correct interpolation.
+- Strict boundary handling.
+- No undocumented extrapolation.
+- Explicit distance units.
+
+### ML calibration must remain independent from MLv
+
+Do not automatically assign:
+
+`ML calibration = MLv calibration`
+
+Even if both use Wood–Anderson amplitudes.
+
+They may require different attenuation relationships and component-combination conventions.
+
+### Default configuration
+
+Initialize ML with:
+
+- Calibration status: Pending Calibration.
+- No fabricated Philippine attenuation curve.
+- Experimental evaluation: Disabled.
+- No default operational approval.
+
+A SeisComP reference example may be offered for explicit experimental use, provided it is clearly labeled as non-authoritative for Philippine operations.
+
+### Station corrections
+
+Reuse the existing station correction hierarchy where appropriate.
+
+Avoid ambiguous station-code-only matches across networks.
+
+Document the station correction sign convention.
+
+---
+
+# 8. CORE ML CALCULATION MODULE
+
+Create a focused pure calculation module, such as:
+
+`src/utils/mlMagnitude.ts`
+
+Follow the existing project naming conventions.
+
+### Responsibilities
+
+The module should perform:
+
+1. Horizontal measurement eligibility assessment.
+2. Compatible component selection.
+3. Amplitude unit normalization.
+4. Horizontal amplitude combination.
+5. Calibration profile validation.
+6. Distance attenuation interpolation.
+7. Station correction application.
+8. Station ML calculation.
+9. Calculation provenance reporting.
+
+### Typed outputs
+
+Include:
+
+- Calculated station ML or null.
+- Calculation status.
+- Rejection reason.
+- Selected component measurement IDs.
+- Selected channel codes.
+- Original amplitude values.
+- Converted amplitudes.
+- Combined amplitude.
+- Combination method.
+- Epicentral/hypocentral distance, as applicable.
+- Interpolated logA0.
+- Applied station correction.
+- Calibration profile ID/version.
+
+Do not use zero to represent a failed magnitude.
+
+Valid zero and negative magnitudes must remain supported.
+
+### Reuse existing utilities
+
+Reuse:
+
+- MAG-A amplitude validation.
+- MAG-B unit conversions.
+- Attenuation interpolation.
+- Station metadata lookup.
+- Existing magnitude aggregation.
+- Existing result status conventions.
+
+Avoid creating another parallel magnitude-processing architecture.
+
+---
+
+# 9. NETWORK ML MAGNITUDE
+
+Integrate station ML values with the shared magnitude aggregation system.
+
+Supported methods:
+
+- Median.
+- Arithmetic mean.
+- Trimmed mean.
+
+Use the selected network aggregation configuration.
+
+### Requirements
+
+- One station contribution per scientifically selected station observation.
+- No double-counting horizontal components.
+- Exclude invalid station results.
+- Preserve individual station calculations.
+- Record excluded stations and reasons.
+- Apply documented minimum contributing-station rules.
+- Report contributing-station count.
+- Report aggregation method actually used.
+- Preserve the MAG-0 small-sample behavior.
+- Retain dispersion/uncertainty information where supported.
+
+Do not combine ML and MLv station results into one magnitude.
+
+Do not combine duration-based magnitudes with amplitude-based magnitudes numerically.
+
+Each method must produce a separate network magnitude.
+
+---
+
+# 10. SHARED MAGNITUDE ENGINE INTEGRATION
+
+Extend the existing:
+
+`src/utils/magnitudeEngine.ts`
+
+Activate:
+
+`ml-local`
+
+only after the calculation module is implemented.
+
+### Required behavior
+
+The shared engine must be able to evaluate:
+
+- `eqp-legacy-ms`
+- `md-duration`
+- `mlv-vertical`
+- `ml-local`
+
+independently.
+
+The new ML processor must use the same method registration, result interfaces, failure isolation, calibration safeguards, and preference handling already established.
+
+### Independent failure handling
+
+If ML calculation fails:
+
+- Preserve valid Legacy Ms.
+- Preserve valid Md.
+- Preserve valid MLv.
+- Report ML's own failure status.
+
+Do not let a failed horizontal measurement invalidate an unrelated duration magnitude.
+
+### Existing PLOT behavior
+
+Do not modify hypocenter calculations.
+
+After successful PLOT, evaluate ML only if it is selected and its requirements are satisfied.
+
+---
+
+# 11. SETTINGS INTEGRATION
+
+Extend the existing Magnitude Configuration section.
+
+### Implemented methods
+
+After MAG-D:
+
+- EQP Legacy Ms
+- Md
+- MLv
+- ML
+
+### Required Settings behavior
+
+- Allow ML to be enabled as an additional magnitude method.
+- Preserve Legacy Ms as the default preferred method.
+- Expose ML calibration status.
+- Provide ML calibration configuration.
+- Provide horizontal-component combination controls.
+- Provide applicable distance and depth limitations.
+- Provide station-correction configuration.
+- Preserve experimental-evaluation safeguards.
+
+### ML status
+
+Possible statuses:
+
+- Implemented — Calibration Required
+- Implemented — Experimental
+- Implemented — Calibrated
+- Missing Required Measurements
+- Invalid Calibration
+
+Do not equate implemented software with validated scientific calibration.
+
+### No unnecessary redesign
+
+Reuse current settings cards and controls.
+
+Keep advanced ML calibration collapsed when not in use.
+
+---
+
+# 12. AMPLITUDE EDITOR INTEGRATION
+
+Reuse:
+
+`AmplitudeMeasurementModal.tsx`
+
+### Required enhancements
+
+- Recognize ML as an implemented amplitude-dependent method.
+- Display eligibility for horizontal Wood–Anderson measurements.
+- Explain missing horizontal component requirements.
+- Identify incompatible channel orientations.
+- Preserve multiple-component measurements.
+- Display concise measurement status.
+- Continue distinguishing ML from MLv.
+
+### Critical restrictions
+
+Do not replace the existing amplitude model.
+
+Do not add a second competing amplitude editor.
+
+Do not remove the original Amp (µm) field.
+
+Do not alter arrival-time or duration-input behavior.
+
+---
+
+# 13. MAGNITUDE COMPARISON UI
+
+Extend the MAG-C comparison table.
+
+After MAG-D, the user should see these methods:
+
+| Method | Description |
+|---|---|
+| EQP Legacy Ms | Duration-derived |
+| Md | Coda duration |
+| MLv | Vertical local amplitude |
+| ML | Horizontal local amplitude |
+
+### Requirements
+
+Display:
+
+- Calculated magnitude.
+- Scientific scale.
+- Calibration status.
+- Number of contributing stations.
+- Current/stale/unavailable status.
+- Preferred magnitude eligibility.
+
+Only show actual computed values.
+
+### Station ML details
+
+Add an ML-specific station detail view.
+
+Recommended columns:
+
+- Station.
+- Horizontal channels.
+- Component amplitudes.
+- Combined amplitude.
+- Combination method.
+- Distance.
+- logA0.
+- Station correction.
+- Station ML.
+- Inclusion/exclusion status.
+
+Reuse existing station detail tabs and visual styling.
+
+Do not add a new top-level application tab.
+
+---
+
+# 14. GLOBAL AND PER-EVENT METHOD SELECTION
+
+MAG-C implemented:
+
+- Use Global Settings.
+- Customize for This Event.
+- Method checkboxes.
+- Single preferred-magnitude selection.
+
+Preserve this architecture.
+
+### Required ML integration
+
+ML should become available as an implemented method checkbox.
+
+When an analyst selects:
+
+- Legacy Ms
+- Md
+- MLv
+- ML
+
+the engine should evaluate each independently.
+
+Only methods with valid measurements and applicable calibration should yield valid magnitude results.
+
+### Default magnitude
+
+Remain:
+
+**EQP Legacy Ms**
+
+Do not automatically change the global or per-event preferred magnitude to ML.
+
+### Preferred ML
+
+Allow a valid ML result to be selected as preferred according to existing publication policy.
+
+Experimental ML remains subject to calculation-bound analyst approval and appropriate labeling.
+
+Do not silently promote ML because it is larger than the other calculated magnitudes.
+
+---
+
+# 15. MAGNITUDE FRESHNESS
+
+Integrate ML into MAG-0's deterministic freshness system.
+
+### ML-dependent inputs
+
+Include relevant:
+
+- Horizontal amplitude measurements.
+- Measurement IDs.
+- Channel orientation.
+- Component selection.
+- Amplitude values.
+- Measurement units.
+- Amplitude conventions.
+- Processing and response provenance.
+- Clipping/exclusion status.
+- Station association.
+- Location and distance.
+- ML calibration profile.
+- Attenuation curve.
+- Horizontal combination policy.
+- Station corrections.
+- Aggregation settings.
+
+### Selective invalidation
+
+Expected behavior:
+
+- Editing a horizontal ML measurement invalidates ML when applicable.
+- Editing a vertical MLv measurement invalidates MLv when applicable.
+- Editing duration invalidates applicable duration methods.
+- Changing the hypocenter invalidates affected distance-dependent methods.
+- Unrelated UI changes do not invalidate scientific magnitude results.
+
+If a shared amplitude record legitimately contributes to more than one method, invalidate every method that consumes it.
+
+### Approval
+
+Changing ML calculation inputs must invalidate previously approved experimental ML results.
+
+Do not invalidate unrelated valid magnitude approvals unnecessarily.
+
+Preserve calculation-bound approval behavior.
+
+---
+
+# 16. RECALCULATE MAGNITUDE
+
+Reuse the existing:
+
+**Recalculate Magnitude**
+
+When an analyst enters or changes horizontal amplitudes after earthquake location:
+
+1. Preserve the existing valid hypocenter.
+2. Retrieve selected calculation methods.
+3. Evaluate ML with the updated measurements.
+4. Refresh the applicable station/network results.
+5. Update magnitude freshness metadata.
+6. Maintain appropriate preferred-magnitude behavior.
+7. Apply experimental approval rules.
+
+Do not rerun the PLOT earthquake-location solver.
+
+Do not create another calculation button.
+
+---
+
+# 17. SAVE/REOPEN AND HISTORICAL COMPATIBILITY
+
+Reuse:
+
+- Legacy `.eqp` ASCII format.
+- `.eqp.meta.json` sidecar.
+- Existing magnitude metadata.
+- Existing amplitude records.
+- MAG-C per-event selection metadata.
+
+### Persist
+
+- ML network result.
+- Station ML results.
+- Horizontal measurement provenance.
+- Component combination policy.
+- Calibration profile ID/version.
+- Calculation identity/fingerprint.
+- Preferred magnitude selection.
+- Analyst approval information.
+- Selected calculation methods.
+
+Avoid duplicating derived data unnecessarily.
+
+### Historical events
+
+Opening a historical event must not automatically recompute ML.
+
+If ML metadata is missing, show the appropriate unavailable/not-calculated state.
+
+Preserve old event files.
+
+Do not invent missing horizontal amplitudes.
+
+Do not silently reinterpret an existing legacy magnitude as modern ML.
+
+---
+
+# 18. BULLETIN AND PRINT INTEGRATION
+
+Reuse the existing shared magnitude resolver and publication guards.
+
+If ML is selected as the preferred event magnitude:
+
+- Display the correct ML scale.
+- Preserve the actual ML value.
+- Preserve method/calibration provenance.
+- Respect freshness.
+- Respect scientific eligibility.
+- Respect experimental approval requirements.
+
+Ensure consistency across:
+
+- Bulletin preview.
+- HTML output.
+- PDF output.
+- Data Print.
+- Print dialogs.
+- Event history.
+- Save-target magnitude handling.
+
+Do not automatically choose the highest magnitude.
+
+Do not substitute MLv for ML.
+
+Do not substitute Legacy Ms for ML without explicit analyst selection.
+
+Preserve original bulletin formatting unless a small change is needed for correct magnitude labeling.
+
+---
+
+# 19. FOCUSED AUTOMATED TESTING
+
+Add focused tests for ML.
+
+### A. Formula
+
+Verify:
+
+- Correct logarithmic calculation.
+- Displacement unit conversions.
+- Correct attenuation interpolation.
+- Correct station correction application.
+- Valid magnitude zero.
+- Valid negative magnitudes.
+- Correct finite-value handling.
+
+### B. Component eligibility
+
+Verify:
+
+- Valid horizontal N/E channels.
+- Valid 1/2 channels with verified orientation metadata.
+- Vertical channel rejection.
+- Missing horizontal component.
+- Incorrect sensor location pairing.
+- Incompatible response metadata.
+- Incompatible amplitude conventions.
+- Raw counts rejection.
+- Clipped or excluded measurements.
+
+### C. Horizontal combination
+
+Verify:
+
+- Mean combination.
+- Maximum combination.
+- Correct normalized units.
+- Correct component-pair selection.
+- Ambiguous pair rejection.
+- No duplicate station contributions.
+- Appropriate single-component policy handling.
+
+### D. Calibration
+
+Verify:
+
+- Missing calibration.
+- Invalid calibration nodes.
+- Valid interpolation.
+- Distance below minimum.
+- Distance above maximum.
+- Experimental profile safeguards.
+- Independent ML and MLv calibration.
+
+### E. Magnitude engine
+
+Verify:
+
+- ML calculation alone.
+- ML and MLv together.
+- ML with duration-based magnitudes.
+- Independent method failure handling.
+- Network aggregation.
+- Per-event selection.
+- Preferred ML selection.
+
+### F. Freshness and persistence
+
+Verify:
+
+- Horizontal amplitude edits invalidate ML.
+- Duration-only changes do not unnecessarily invalidate ML.
+- Calibration changes invalidate ML.
+- Save/reopen restores ML metadata.
+- Historical events remain unchanged.
+- Experimental approval is calculation-bound.
+- Bulletin selection remains consistent.
+
+### G. Existing workflow compatibility
+
+Verify:
+
+- Legacy Ms unchanged.
+- Md unchanged.
+- MLv unchanged.
+- PLOT location unchanged.
+- Recalculate Magnitude unchanged.
+- Atlas/Hydra parsing unchanged.
+- Station editor unchanged.
+- Existing MAG-C controls unchanged.
+
+---
+
+# 20. DEVELOPMENT VERIFICATION
+
+Run:
+
+- Focused ML tests.
+- Relevant magnitude tests.
+- TypeScript typecheck.
+- Production Vite build.
+
+If inexpensive, run the existing automated test suite once.
+
+Avoid broad scientific validation and unnecessary repeated acceptance campaigns.
+
+If the preview environment supports a quick manual UI smoke test, perform one focused check of the ML settings and result-selection controls.
+
+Report whether live browser interaction was actually verified.
+
+Do not claim Philippine operational calibration based on software test success.
+
+---
+
+# 21. IMPLEMENTATION SEQUENCE
+
+Work strictly sequentially.
+
+### Step 1 — Audit
+
+Inspect existing MLv, amplitude measurements, MAG-C method selection, freshness and persistence.
+
+Confirm the current implementation before modifying it.
+
+### Step 2 — Scientific ML module
+
+Implement the horizontal ML formula and reusable scientific calculations.
+
+### Step 3 — Horizontal eligibility and combination
+
+Implement compatible horizontal-component selection, validation and combination.
+
+### Step 4 — Calibration
+
+Introduce independent ML attenuation profiles and station corrections.
+
+### Step 5 — Station/network ML
+
+Calculate station and network ML using the existing aggregation system.
+
+### Step 6 — Engine integration
+
+Activate `ml-local` and integrate it into the shared magnitude processor.
+
+### Step 7 — Settings and input UI
+
+Expose ML configuration and measurement eligibility through the existing components.
+
+### Step 8 — Results and preference
+
+Add ML to the multi-method comparison interface, station details, and preferred selection.
+
+### Step 9 — Persistence, freshness and bulletins
+
+Integrate with the existing event metadata and scientific safeguards.
+
+### Step 10 — Verification
+
+Run focused tests, TypeScript and build checks.
+
+Fix confirmed defects introduced by MAG-D.
+
+Do not begin mb or Ms_20 development.
+
+---
+
+# 22. STRICT RESTRICTIONS
+
+Do not:
+
+- Modify the earthquake-location solver.
+- Change PLOT's operational meaning.
+- Rewrite EQP Legacy Ms.
+- Change Md formulas.
+- Change MLv formulas.
+- Replace MAG-A's amplitude model.
+- Rebuild MAG-C's method-selection interface.
+- Add waveform processing.
+- Add mb, mB, Ms_20, Ms(BB), or Mwp.
+- Invent Philippine regional calibration.
+- Automatically change the preferred magnitude.
+- Remove experimental approval safeguards.
+- Modify PRIMER or Research Assistant.
+- Introduce unnecessary dependencies.
+- Initialize or synchronize Git.
+- Deploy the application.
+- Perform unrelated refactoring.
+
+Preserve all previously completed functionality.
+
+---
+
+# 23. ACCEPTANCE CRITERIA
+
+MAG-D is development-complete when:
+
+- Horizontal ML calculation is implemented.
+- Horizontal-component eligibility is correctly enforced.
+- Component combination is configurable and documented.
+- Incompatible measurements are rejected.
+- ML calibration is independent from MLv.
+- Station ML values are calculated.
+- Network ML is calculated using eligible station contributions.
+- No horizontal-component double-counting occurs.
+- ML is available in Settings.
+- ML participates in MAG-C method selections.
+- ML appears in the comparison table.
+- ML has appropriate station-level details.
+- ML can be selected as preferred when scientifically eligible.
+- Recalculate Magnitude evaluates ML without rerunning PLOT.
+- ML freshness is selectively maintained.
+- Event save/reopen preserves ML metadata.
+- Bulletin approval and provenance safeguards remain intact.
+- Legacy Ms, Md, and MLv calculations remain unchanged.
+- Focused tests pass.
+- TypeScript and build pass.
+
+Scientific operational acceptance remains dependent on a suitable calibrated ML relationship for the intended Philippine network.
+
+---
+
+# 24. REQUIRED COMPLETION REPORT
+
+Provide:
+
+1. Existing implementation inspected.
+2. Files created or modified.
+3. ML equation implemented.
+4. Horizontal measurement eligibility.
+5. Component combination rules.
+6. Calibration profile implementation.
+7. Station ML calculation.
+8. Network ML calculation.
+9. Magnitude engine integration.
+10. Settings integration.
+11. Multi-method comparison integration.
+12. Preferred magnitude behavior.
+13. Freshness and approval handling.
+14. Save/reopen and bulletin integration.
+15. Tests executed and results.
+16. TypeScript/build results.
+17. Scientific calibration limitations.
+18. Live browser verification status.
+19. Readiness for MAG-E.
+
+Use explicit classifications:
+
+- IMPLEMENTED
+- UNIT VERIFIED
+- BUILD VERIFIED
+- EXPERIMENTAL
+- CALIBRATION PENDING
+- NOT LIVE VERIFIED
+- BLOCKED
+- NOT IMPLEMENTED
+
+Do not claim operational scientific validation merely because TypeScript, build and automated tests pass.
+
+---
+
+# FINAL INSTRUCTION
+
+Proceed with **MAG-D — Horizontal Local Magnitude (ML) Calculation** in the existing GAS workspace.
+
+Build on MAG-0 through MAG-C without reconstructing completed components.
+
+The primary objective is to add scientifically distinct horizontal-component ML to the existing magnitude engine so that EQP Modern can calculate:
+
+**Legacy Ms + Md + MLv + ML**
+
+for the same earthquake whenever the selected methods have valid measurements and appropriate calibration.
+
+Keep EQP Legacy Ms as the global default.
+
+Do not silently assign Philippine calibration coefficients.
+
+Preserve method-specific freshness, analyst approval, station contributions, preferred-magnitude selection, event persistence and bulletin safeguards.
+
+Perform focused verification and provide the completion report.
+
+**Stop after MAG-D. Do not begin MAG-E until MAG-D has been reviewed.**
+
+### Scientific references
+
+- [SeisComP ML — Standard Local Magnitude](https://www.seiscomp.de/doc/apps/global_ml.html)
+- [SeisComP MLv — Vertical Local Magnitude](https://www.seiscomp.de/doc/apps/global_mlv.html)
+- [SeisComP Amplitudes and Magnitudes](https://docs.gempa.de/seiscomp/current/base/concepts/magnitudes.html)

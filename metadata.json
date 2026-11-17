@@ -1,0 +1,11 @@
+{
+  "name": "Earthquake Processor (EQP) 21",
+  "description": "Seismological phase picking, hypocenter location, magnitude evaluation, and earthquake bulletin workstation.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

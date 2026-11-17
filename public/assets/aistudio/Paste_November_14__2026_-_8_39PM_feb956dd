@@ -1,0 +1,959 @@
+# EQP MODERN — MULTI-MODEL EARTHQUAKE LOCATION SYSTEM
+## Implementation Instructions for Google AI Studio
+
+### ROLE AND PRIMARY OBJECTIVE
+
+You are the lead software engineer, scientific computing developer, and seismological application modernization specialist assigned to improve the existing **EQP Modern (Earthquake Processor)** application.
+
+Your task is to **implement, integrate, verify, and test a multi-model seismic travel-time system** within the EXISTING EQP Modern application.
+
+Do not merely explain how to implement the features. Perform the necessary source-code modifications, create the supporting modules and tests, and integrate the functionality into the existing interface.
+
+Work carefully, sequentially, and systematically.
+
+The completed system must allow earthquake hypocenter calculations using these three travel-time models:
+
+1. **Jeffreys–Bullen (J-B)** — existing `JBTAB.PS` dataset.
+2. **iasp91** — modern global reference model.
+3. **ak135** — modern global reference model.
+
+It must also support comparing results from different models without unintentionally changing the active earthquake event.
+
+Maintain the original scientific reference data, established operator workflows, and existing application functions.
+
+---
+
+# SECTION A — PROJECT CONTEXT
+
+## A1. Existing Application
+
+EQP Modern is an existing React/TypeScript application using Vite, Express, and associated libraries.
+
+It already includes:
+
+- Earthquake event management
+- Seismic station information and phase entry
+- P-wave and S-wave observations
+- Hypocenter location
+- Jeffreys–Bullen travel-time lookup
+- Location residual and uncertainty displays
+- Station database management
+- Nearest city, town, and generator calculations
+- Earthquake mapping
+- Magnitude processing
+- Bulletin preparation
+- Event history
+- File import/export
+- Various visualization and experimental features
+
+**Do not replace this application, rebuild it from scratch, or create a separate unrelated application.**
+
+Modify the existing source using the smallest reasonable architectural changes.
+
+Preserve the current visual identity, layout, navigation, styling, station tables, mapping, bulletin, printing, and existing workflows.
+
+## A2. Important Existing Source Files
+
+Inspect these files before making changes:
+
+| File | Purpose |
+|---|---|
+| `src/App.tsx` | Main application, GUI, processing controls, and location workflow |
+| `src/utils/hypocenterSolver.ts` | Existing iterative hypocenter solver |
+| `src/utils/jbtab.ts` | J-B table parser, interpolation, and travel-time prediction |
+| `src/data/jbtabRaw.ts` | Embedded original JBTAB dataset |
+| `src/data/eqpData.ts` | Earthquake, station, solver, and history types |
+| `src/utils/eqpStorage.ts` | EQP file conversion and derived observation calculations |
+| `src/utils/eqpHistory.ts` | Event history and checkpoints |
+| `src/utils/nearestPlaces.ts` | Geographic distance and bearing calculations |
+| `server.ts` | Local application server and storage APIs |
+| `package.json` | Existing dependencies and scripts |
+
+Inspect additional files only when required by an identified dependency or implementation step.
+
+Do not indiscriminately search unrelated folders or modify unrelated modules.
+
+## A3. Existing Scientific Implementation
+
+The current application uses:
+
+`solveHypocenterWithJbtab()`
+
+This performs an iterative damped Gauss–Newton-style hypocenter inversion using J-B travel times.
+
+It obtains travel-time predictions through:
+
+`lookupJbTravelTime()`
+
+The existing solver selector offers:
+
+- `EQP`
+- `HypoInverse`
+
+However, the `HypoInverse` selection currently modifies weighting and damping behavior within the same internal solver. It does not execute the official HYPOINVERSE2000 program.
+
+Do not describe it as an independently implemented HYPOINVERSE2000 locator.
+
+Preserve backward compatibility while clarifying this distinction in the GUI as appropriate.
+
+## A4. Original Legacy PLOTTER Engine
+
+The historical Delphi EQP application invokes a compiled `PLOTTER1.EXE` scientific engine.
+
+This binary is the legacy operational reference.
+
+The existing EQP Modern package does not include a verified working PLOTTER integration.
+
+Therefore:
+
+- Preserve the possibility of a separate PLOTTER adapter.
+- Do not invent PLOTTER algorithms or binary behavior.
+- Do not replace PLOTTER scientific authority with assumptions about historical Fortran code.
+- Do not implement HYPOINVERSE2000 as part of this task.
+- Do not claim legacy scientific parity without independent execution evidence.
+
+The present task focuses on improving the modern application and adding selectable travel-time models.
+
+---
+
+# SECTION B — MANDATORY DEVELOPMENT RULES
+
+## B1. Work Sequentially
+
+Follow the implementation stages in the specified order.
+
+For each stage:
+
+1. Inspect relevant existing code.
+2. Establish expected behavior.
+3. Implement the smallest appropriate changes.
+4. Run targeted tests.
+5. Run available regression checks.
+6. Correct any failures introduced by the stage.
+7. Record the results.
+8. Continue only after the stage's acceptance conditions pass.
+
+Do not implement several unverified stages simultaneously.
+
+Do not skip failed tests to progress faster.
+
+Continue autonomously through subsequent stages when their acceptance conditions are satisfied and the necessary tools and data are available.
+
+If a required stage cannot be completed because of missing scientific data, unavailable execution tools, or external dependencies, document the blocker and stop changes that depend on it. Continue only with genuinely independent work that does not bypass the blocked stage.
+
+## B2. Preserve the Existing Application
+
+The following must remain intact:
+
+- Current earthquake event structure and data
+- Manual P/S phase entry
+- Station selection and editing
+- Existing processing-mode labels (`Semi-Auto`, `AutoPlot1`, `AutoPlot2`)
+- Existing J-B scientific dataset
+- Geographic reference catalogs
+- Earthquake maps
+- Nearest-location calculations
+- Magnitude tools
+- Bulletin and printing features
+- EQP file import/export behavior
+- Event history and persistence
+
+Existing application functions must not be removed merely because they are unrelated to the new travel-time models.
+
+If an existing function is defective, document its original behavior before correction.
+
+## B3. Preserve Scientific Data
+
+The numerical values of `JBTAB.PS` must remain unchanged.
+
+Do not automatically edit suspicious values or substitute values from newer models.
+
+Specific findings requiring attention:
+
+- P-wave table: 15 source-depth rows, 103 distance columns.
+- S-wave table: 14 source-depth rows, 108 distance columns.
+- P and S depth grids differ.
+- Source-depth values are not uniformly spaced.
+- The S table contains 25 terminal zero placeholders representing unavailable predictions.
+- The S-wave surface-depth value at 0° is 10.7 seconds.
+- The P-wave value at 603 km and 45° is 446.6 seconds and requires independent historical verification.
+
+Preserve these values in the reference dataset.
+
+Do not assume every unusual value is erroneous.
+
+Do not automatically fill missing travel times.
+
+## B4. Scientific Accuracy Before Appearance
+
+A good-looking result is not evidence that a hypocenter calculation is correct.
+
+Do not:
+
+- Invent travel-time tables.
+- Generate arbitrary velocity profiles.
+- Fabricate numerical test results.
+- Return preset hypocenters instead of calculating them.
+- Silently clamp unsupported model requests.
+- Substitute a different model when the selected model fails.
+- Claim convergence when the solution geometry is underdetermined.
+- Claim scientific accuracy based only on a low RMS residual.
+- Present experimental models as operationally approved.
+
+If a model is not yet implemented and tested, its GUI selection must be disabled and clearly labeled as unavailable.
+
+## B5. Workspace and Tool Restrictions
+
+Work only within the opened EQP Modern project.
+
+Do not access unrelated projects, accounts, folders, Google Drive files, databases, or cloud deployments.
+
+Do not publish, deploy, push to remote repositories, overwrite external operational data, or initiate network-accessible services without explicit authorization.
+
+Do not request, expose, or hardcode passwords, API keys, or private credentials.
+
+Use local development facilities and the existing project preview when available.
+
+If Google AI Studio cannot execute a required native test or dependency, report that limitation accurately. Do not mark unexecuted tests as passed.
+
+Do not replace the application's package-management setup or upgrade unrelated dependencies unnecessarily.
+
+---
+
+# SECTION C — REQUIRED FINAL ARCHITECTURE
+
+Implement four distinct components.
+
+## C1. Location Controller
+
+Responsibilities:
+
+- Receive the selected earthquake event.
+- Validate station information and observations.
+- Create an immutable input snapshot.
+- Select the location engine.
+- Select the travel-time model.
+- Execute calculations.
+- Produce candidate solutions.
+- Manage validation and failures.
+- Allow operator adoption of a calculated solution.
+
+## C2. Location Solver
+
+The location solver estimates:
+
+- Origin time
+- Latitude
+- Longitude
+- Source depth
+
+It should receive travel-time predictions through a model-provider interface.
+
+Retain and improve the existing iterative solver rather than unnecessarily replacing its numerical architecture.
+
+## C3. Travel-Time Providers
+
+Create a clean provider abstraction supporting:
+
+- J-B (`JBTAB.PS`)
+- iasp91
+- ak135
+
+Each provider must supply documented phase-dependent travel-time predictions.
+
+Where supported, include:
+
+- Travel time in seconds
+- Distance derivative
+- Source-depth derivative
+- Phase identifier
+- Ray-branch identifier
+- Model identity and version
+- Prediction validity
+- Explicit failure reason
+
+The interface must support efficient computation within iterative inversion.
+
+Do not implement an HTTP request for every phase observation on every solver iteration.
+
+Use in-process lookups, batching, or an appropriately designed local scientific service.
+
+## C4. Scientific Results and History
+
+Every solution must carry:
+
+- Event identity
+- Input observation snapshot or checksum
+- Station catalog identity
+- Solver ID and version
+- Travel-time model and version
+- Model checksum where applicable
+- Phase-selection policy
+- Correction profile
+- Fixed/free depth status
+- Calculated location
+- Residuals
+- Station usage
+- Geometry and quality diagnostics
+- Convergence status
+- Validation status
+- Adoption status and timestamp
+
+Keep candidate solutions separate from the active event until explicitly adopted.
+
+---
+
+# SECTION D — IMPLEMENTATION STAGES
+
+## STAGE 0 — BASELINE AND SOURCE INSPECTION
+
+Before editing:
+
+1. Inspect the existing application structure.
+2. Trace the hypocenter calculation from the GUI through the solver and travel-time lookup.
+3. Identify the event update and persistence paths.
+4. Identify existing tests or the absence of tests.
+5. Record the current runtime and build status.
+6. Preserve a baseline copy or source-control checkpoint if available.
+7. Record the checksum of the embedded J-B dataset.
+8. Capture existing numerical outputs for representative events.
+
+Identify existing defects and establish expected behavior before modifying anything.
+
+**Acceptance:** The baseline is documented and sufficiently reproducible to detect regressions.
+
+---
+
+## STAGE 1 — CORRECT EXISTING J-B LOOKUP AND SOLVER DEFECTS
+
+### 1.1 Table Lookup
+
+Review `src/utils/jbtab.ts`.
+
+Correct:
+
+- Silent clamping outside supported distance ranges
+- Silent clamping outside supported depth ranges
+- Invalid inputs becoming zero
+- Interpolation over unavailable cells
+- Incorrect assumptions about shared P/S depth grids
+- Derivative handling at table boundaries
+
+Unsupported requests must produce explicit, structured failure results rather than plausible numerical substitutes.
+
+Preserve the original table values.
+
+Add tests for:
+
+- Exact table-node lookups
+- Bilinear interpolation
+- Distinct P/S depth grids
+- Zero depth
+- Maximum valid distance
+- Invalid depth and distance
+- NaN and infinite inputs
+- Unavailable S-wave cells
+- Interpolation near unavailable regions
+- The identified 603-km/45° P-wave value
+
+### 1.2 Solver Validation
+
+Review `src/utils/hypocenterSolver.ts`.
+
+Correct:
+
+- Unknown stations receiving arbitrary fallback coordinates
+- Insufficient independent station geometry
+- Inadequate observation counts
+- False convergence
+- Singular or poorly conditioned inversion systems
+- Invalid numerical derivatives
+- Unjustified uncertainty values
+- Unsupported travel-time requests
+- Failure handling for invalid observations
+
+For free-depth inversion, ensure the data provide sufficient independent constraints to solve the four unknowns.
+
+Do not use observation count alone as proof of solvability.
+
+Check geometric coverage, Jacobian rank or conditioning, and meaningful convergence criteria.
+
+Use an explicit fixed-depth policy when appropriate.
+
+Reject unknown stations unless their coordinates are supplied through an explicitly validated metadata mechanism.
+
+### 1.3 Existing Numerical Conventions
+
+Investigate:
+
+- Existing S-delay scaling by 1.73
+- Quality-weight behavior
+- Fixed/free depth handling
+- Takeoff-angle approximations
+- Arrival-time parsing and hour rollover
+- Numerical uncertainty interpretation
+
+Do not silently change scientifically consequential behavior without documenting it.
+
+Retain legacy-compatible behavior where required for comparison, while identifying corrected modern behavior separately.
+
+### 1.4 Zero-Depth Preservation
+
+Correct expressions such as:
+
+`depthKm || 15`
+
+when they unintentionally replace a valid zero-kilometer depth.
+
+Use explicit null/undefined handling where appropriate.
+
+**Acceptance:** Valid baseline cases work reproducibly, and invalid cases fail safely with meaningful diagnostics.
+
+---
+
+## STAGE 2 — SEPARATE LOCATION CALCULATION FROM EVENT ADOPTION
+
+The current `handleRunLocate()` in `src/App.tsx` updates the active earthquake event immediately after successful calculation.
+
+Refactor this behavior.
+
+Introduce a **Candidate Location Solution**.
+
+The revised workflow must be:
+
+1. Operator selects solver and model.
+2. Operator clicks Locate.
+3. Application validates inputs.
+4. Application calculates a candidate solution.
+5. Application displays the calculated result and quality diagnostics.
+6. Operator can adopt, compare, or discard the candidate.
+7. Only adoption updates the active event and its derived products.
+
+Important:
+
+- A failed calculation must not alter event data.
+- A discarded candidate must not alter event data.
+- Changing models must not alter active event data.
+- Editing station picks after calculation must invalidate or clearly mark stale candidates.
+- Adoption must update the correct event revision.
+- Avoid accidental updates when the user switches events during a calculation.
+- Preserve existing geographic, magnitude, bulletin, history, and persistence behavior at the appropriate adoption point.
+
+Do not force model metadata into incompatible legacy `.EQP` fields.
+
+Use a versioned modern event record or companion persistence structure.
+
+**Acceptance:** Calculate, inspect, adopt, discard, save, and reopen all work without unintended event changes.
+
+---
+
+## STAGE 3 — CREATE THE TRAVEL-TIME PROVIDER SYSTEM
+
+Decouple the main solver from direct use of `lookupJbTravelTime()`.
+
+Create appropriately named modules for:
+
+- Travel-time provider types
+- Provider registry
+- J-B provider
+- Model metadata
+- Model compatibility rules
+- Prediction validity and failure handling
+
+Select a practical interface that supports synchronous or batched asynchronous computations, according to the selected implementation.
+
+Initially, register only the working J-B provider.
+
+Make sure:
+
+- The model ID is independent of the solver ID.
+- Existing EQP calculations still work.
+- Table values remain unchanged.
+- Invalid-domain requests remain rejected.
+- The provider supplies documented derivatives or reports when they are unavailable.
+- The scientific model and correction profile are explicitly identified.
+
+Do not add fake iasp91 or ak135 providers merely to populate the model list.
+
+**Acceptance:** The refactored J-B provider passes the corrected Stage 1 regression tests and produces equivalent results for all valid unchanged baseline cases.
+
+---
+
+## STAGE 4 — INTEGRATE iasp91
+
+Implement an authentic iasp91 travel-time provider.
+
+First evaluate two approaches:
+
+**Option A:** Precomputed validated travel-time tables generated from an established TauP implementation.
+
+**Option B:** A local TauP-compatible calculation service or integration.
+
+Prefer the simpler deployment architecture only if scientific accuracy and phase handling are adequately demonstrated.
+
+Requirements:
+
+- Use authentic, documented iasp91 model data.
+- Record the model source and version.
+- Support source-depth-dependent P/S calculations.
+- Establish an explicit first-arrival phase policy.
+- Handle multiple arrival branches correctly.
+- Reject unsupported phases.
+- Handle ray-branch boundaries without invalid interpolation.
+- Supply or independently verify travel-time derivatives.
+- Avoid extrapolation into unsupported regions.
+- Do not silently substitute J-B travel times.
+
+If using generated tables, compare interpolated values with independent direct calculations across:
+
+- Near distances
+- Regional distances
+- Teleseismic distances
+- Shallow events
+- Intermediate-depth events
+- Deep events
+- Phase-branch boundaries
+
+Define justified numerical acceptance tolerances before evaluating the implementation.
+
+Do not invent model files or reference outputs if authoritative model resources are unavailable.
+
+**Acceptance:** The iasp91 provider produces independently verified predictions and passes integration and regression tests.
+
+Only then enable the iasp91 GUI option.
+
+---
+
+## STAGE 5 — INTEGRATE ak135
+
+Add ak135 using the existing provider architecture.
+
+Requirements:
+
+- Authentic ak135 model data
+- Documented source and version
+- Compatible phase-selection rules
+- Correct source-depth handling
+- Verified derivatives or numerical derivative methods
+- Explicit unsupported-phase behavior
+- Independent numerical reference tests
+- No impact on verified J-B and iasp91 results
+
+Avoid duplicating the entire solver.
+
+**Acceptance:** ak135 passes its reference cases, and all prior model regression tests remain successful.
+
+Only then enable the ak135 GUI option.
+
+---
+
+## STAGE 6 — IMPLEMENT THE MULTI-MODEL GUI AND COMPARISON SYSTEM
+
+### 6.1 Main Toolbar
+
+Preserve the existing EQP Modern layout.
+
+Near the current location-engine selector, add:
+
+**Travel-Time Model**
+
+Available options:
+
+- J-B — JBTAB.PS
+- iasp91
+- ak135
+
+J-B remains the initial default.
+
+Unavailable or unverified providers must appear disabled or clearly identified as unavailable.
+
+Do not automatically change the selected model when another model fails.
+
+Retain the existing processing-mode toolbar.
+
+Do not claim that current `Semi-Auto`, `AutoPlot1`, or `AutoPlot2` controls perform actions not actually implemented.
+
+### 6.2 Model Comparison
+
+Add a **Compare Models** button beside the location action.
+
+Implement two distinct comparison modes.
+
+**Mode A — Fixed-Hypocenter Travel-Time Comparison**
+
+Use the same fixed earthquake location and source depth.
+
+Calculate predicted arrival times for each model.
+
+Show:
+
+- Station
+- Phase
+- Epicentral distance
+- Source depth
+- Predicted P/S travel times
+- Difference from J-B
+- Phase or ray branch
+- Prediction validity
+
+This isolates differences between travel-time models.
+
+**Mode B — Independently Relocated Hypocenters**
+
+Using the same immutable observation snapshot, run each model through the validated solver.
+
+Show:
+
+- Model name
+- Origin time
+- Latitude
+- Longitude
+- Depth
+- RMS
+- Weighted RMS
+- Used station count
+- Used P/S observation counts
+- Azimuthal gap
+- Epicentral difference from J-B
+- Depth difference
+- Uncertainty or conditioning diagnostics
+- Quality status
+
+If models have different sets of valid phases, disclose this clearly.
+
+For a strict common-pick comparison, use the intersection of valid observations and document it.
+
+Do not compare different RMS definitions as though they were equivalent.
+
+### 6.3 Map Comparison
+
+Use the existing epicenter map where practical.
+
+Allow comparison of J-B, iasp91, and ak135 epicenters with clearly distinguishable markers.
+
+Show geographic differences without inventing location accuracy.
+
+### 6.4 Candidate Adoption
+
+Permit the operator to:
+
+- Inspect model results
+- Compare station residuals
+- Adopt a chosen result
+- Discard a result
+- Return to the original event
+
+Never automatically choose the lowest-RMS model.
+
+### 6.5 Model Settings
+
+Add a compact Model Settings dialog displaying:
+
+- Model ID and version
+- Model source
+- Supported seismic phases
+- Source-depth limits
+- Applicable distance ranges
+- Phase-selection policy
+- Correction profile
+- Validation status
+
+Do not initially expose unrestricted station, elevation, regional, or ellipticity correction checkboxes.
+
+Only enable correction methods when documented, implemented, and scientifically validated.
+
+**Acceptance:** All three verified models can be selected, located, compared, and adopted without disrupting established application workflows.
+
+---
+
+## STAGE 7 — FINAL VALIDATION AND SCIENTIFIC ACCEPTANCE
+
+Perform comprehensive tests.
+
+### A. Numerical Tests
+
+- Exact J-B table values
+- Interpolation results
+- Unsupported table regions
+- iasp91 reference cases
+- ak135 reference cases
+- Travel-time derivatives
+- Branch transitions
+- Finite numerical results
+
+### B. Solver Tests
+
+- Good station geometry
+- Poor station geometry
+- Unknown stations
+- Duplicate stations
+- Invalid coordinates
+- Insufficient phase observations
+- Poor initial hypocenter guesses
+- Fixed-depth solutions
+- Free-depth solutions
+- Nonconvergence
+- Ill-conditioned inversion
+- Invalid picks
+- Arrival-time rollover
+
+### C. Comparison Tests
+
+- Same input observation snapshots
+- Correct model selection
+- Correct model identification
+- Correct residual calculations
+- Accurate model-difference calculations
+- No unintended event mutations
+- No silent model fallback
+
+### D. Persistence Tests
+
+- Save and reopen a selected model solution
+- Restore model identity
+- Restore scientific configuration
+- Restore location history
+- Preserve event data
+- Preserve legacy `.EQP` compatibility
+- Reject unintended overwrites and stale adoption
+
+### E. Regression Tests
+
+Verify that these still work:
+
+- Opening earthquake records
+- Station editing
+- Phase entry
+- Locating an earthquake
+- Epicenter mapping
+- Geographic nearest-place results
+- Magnitude processing
+- Bulletins
+- Event histories
+- Printing/export
+- Existing navigation
+
+### F. Scientific Validation
+
+Use independently constrained earthquake locations if suitable reference data are supplied.
+
+Include events with varying:
+
+- Depths
+- Geographic regions
+- Station counts
+- Azimuthal coverage
+- Pick qualities
+
+Compare computed earthquake locations against independent references.
+
+Evaluate:
+
+- Horizontal location error
+- Depth error
+- Origin-time difference
+- Residual distribution
+- Geometry and uncertainty behavior
+
+Do not declare any model scientifically superior based only on a smaller RMS.
+
+Built-in demonstration events are useful for software testing but are not sufficient to establish operational location accuracy.
+
+If independent reference events or the original PLOTTER executable are unavailable, explicitly report scientific-parity or operational-acceptance testing as **BLOCKED / NOT VERIFIED** rather than falsely passing it.
+
+---
+
+# SECTION E — SCIENTIFIC CORRECTION POLICY
+
+The following correction categories may eventually be supported:
+
+1. Station-specific travel-time corrections
+2. Phase-specific station corrections
+3. Station elevation corrections
+4. Regional velocity corrections
+5. Ellipticity corrections
+
+For this implementation:
+
+- Preserve existing legacy correction behavior for controlled comparisons.
+- Document model-specific assumptions.
+- Disable unverified modern correction profiles.
+- Never apply corrections twice.
+- Never assume the existing S-wave delay multiplier is universally valid.
+- Never use arbitrary Philippine regional correction constants.
+- Keep corrected predictions reproducible and traceable.
+
+Do not alter the original J-B table to insert modern corrections.
+
+Corrections belong in an explicitly versioned prediction/correction layer.
+
+---
+
+# SECTION F — USER INTERFACE REQUIREMENTS
+
+The GUI must remain consistent with the existing EQP Modern design.
+
+Use the current toolbar structure and established visual styles.
+
+Avoid unnecessary redesigns.
+
+Desired controls:
+
+**Main location toolbar:**
+
+- Location Engine
+- Travel-Time Model
+- Model Settings
+- Locate Hypocenter
+- Compare Models
+
+**Candidate result panel:**
+
+- Calculated hypocenter
+- Model identity
+- RMS and relevant quality diagnostics
+- Used stations/phases
+- Warnings
+- Adopt Solution
+- Discard Solution
+
+**Model comparison view:**
+
+- Summary comparison table
+- Fixed-hypocenter prediction comparison
+- Relocated-hypocenter comparison
+- Station residual details
+- Epicenter map
+- Scientific warnings
+
+The interface must clearly distinguish:
+
+- Available model
+- Unavailable model
+- Successful numerical calculation
+- Failed or underconstrained solution
+- Research-only model
+- Scientifically validated model
+- Operator-adopted solution
+
+Do not use success styling for failed or scientifically unverified results.
+
+---
+
+# SECTION G — TESTING AND ENGINEERING QUALITY
+
+Use the existing project technology stack.
+
+Create automated tests using suitable tooling compatible with the existing project.
+
+Avoid unnecessary dependencies.
+
+Run available commands such as:
+
+- TypeScript validation
+- Production build
+- Scientific unit tests
+- Integration tests
+- Targeted GUI or browser tests
+
+Use the actual project scripts and environment.
+
+If a test command is missing, add an appropriate reproducible test command rather than merely describing the test.
+
+Do not assert that a test passed unless it was actually executed successfully.
+
+Record commands, results, and limitations.
+
+Where automated browser testing is unavailable, explicitly provide manual verification cases instead of claiming completion.
+
+Ensure reasonable responsiveness during calculations.
+
+Use bounded numerical iteration and guard against unresponsive computation.
+
+Avoid changing unrelated application infrastructure.
+
+---
+
+# SECTION H — DOCUMENTATION AND COMPLETION REPORTS
+
+Maintain concise project documentation inside the existing project.
+
+Suggested documentation:
+
+- `docs/MULTI_MODEL_IMPLEMENTATION.md`
+- `docs/TRAVEL_TIME_MODEL_REGISTRY.md`
+- `docs/SCIENTIFIC_VALIDATION.md`
+- `docs/MULTI_MODEL_TEST_RESULTS.md`
+
+Adapt these filenames if the project already has an established documentation structure.
+
+After each stage, report:
+
+**Stage:** Number and title  
+**Status:** PASS / FAIL / BLOCKED / PARTIAL  
+**Files changed:** Exact file paths  
+**Implemented:** Actual completed features  
+**Tests executed:** Commands and results  
+**Scientific issues:** Any unresolved concerns  
+**Regression status:** Verified existing behaviors  
+**Next stage:** What can safely proceed
+
+Do not write lengthy speculative reports in place of working implementation.
+
+---
+
+# SECTION I — FINAL ACCEPTANCE CRITERIA
+
+The implementation is functionally complete only when:
+
+1. The original J-B data remain unchanged.
+2. J-B lookup defects have been corrected.
+3. The solver rejects invalid or insufficient inputs.
+4. The solver uses a defined travel-time provider interface.
+5. iasp91 predictions have been independently verified.
+6. ak135 predictions have been independently verified.
+7. Operators can select installed, verified models.
+8. Operators can compare model predictions and calculated locations.
+9. Model comparison does not overwrite the current event.
+10. Adopting a solution updates the intended event correctly.
+11. Model identity and scientific metadata are preserved.
+12. Previously working EQP functions remain operational.
+13. Automated tests and available build checks pass.
+14. Scientific performance claims are supported by appropriate reference evidence.
+15. Original PLOTTER compatibility is not falsely claimed.
+
+Separate **functional implementation completion** from **scientific operational acceptance**.
+
+A successful build does not constitute scientific validation.
+
+---
+
+# SECTION J — START IMPLEMENTATION NOW
+
+Begin with **Stage 0 — Baseline and Source Inspection**.
+
+Inspect the actual files in the currently opened EQP Modern workspace.
+
+Confirm the real source structure rather than assuming every documented path or function remains unchanged.
+
+Then perform Stage 1 and continue sequentially through the implementation stages as long as their acceptance conditions pass.
+
+**Do not stop after producing another plan. Begin modifying the actual application.**
+
+Do not redesign the entire GUI.
+
+Do not replace the original J-B numerical dataset.
+
+Do not introduce HYPOINVERSE2000, PREM, Philippine 3D modeling, or unrelated features during this task.
+
+Do not use fabricated scientific data.
+
+Do not skip tests to declare success.
+
+If the environment lacks genuine iasp91/ak135 model data, a required runtime, or appropriate verification references, report the precise dependency and provide the minimum user action needed to unblock it.
+
+Make as much verified implementation progress as the available environment permits.
+
+**Priority order: scientific correctness → existing functionality preservation → reliable model integration → operator comparison → polished interface.**
+
+The goal is a working, reproducible, scientifically defensible multi-model earthquake-location capability integrated into the existing EQP Modern application.
